@@ -185,12 +185,27 @@ http.createServer(async (req, res) => {
     try {
       const body = await readBody(req);
       const input = body.data || body;
+      console.log("DEBUG serverFn:", hash.slice(0,8), "body:", JSON.stringify(body).slice(0,300), "input:", JSON.stringify(input).slice(0,300));
       const result = await handler(input);
       sendJson(res, result);
     } catch (e) {
       console.error("Server fn error:", e);
       sendJson(res, { ok: false, error: "خطأ في الخادم" });
     }
+    return;
+  }
+
+  if (urlPath === "/debug-echo" && req.method === "POST") {
+    const raw = await new Promise(r => { let b=""; req.on("data",c=>b+=c); req.on("end",()=>r(b)); });
+    let parsed, deserialized;
+    try { parsed = JSON.parse(raw); } catch { parsed = "PARSE_ERROR"; }
+    try {
+      if (parsed && typeof parsed.t === "number" && parsed.p) deserialized = deserializeSeroval(parsed);
+      else deserialized = parsed;
+    } catch { deserialized = "DESER_ERROR"; }
+    const json = JSON.stringify({ rawLength: raw.length, rawFirst200: raw.slice(0,200), parsed, deserialized, extractedData: deserialized?.data }, null, 2);
+    res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+    res.end(json);
     return;
   }
 

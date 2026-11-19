@@ -98,7 +98,7 @@ function readBody(req) {
 }
 
 function sendJson(res, data) {
-  const json = JSON.stringify(data);
+  const json = JSON.stringify({ result: data });
   res.writeHead(200, { "Content-Type": "application/json" });
   res.end(json);
 }

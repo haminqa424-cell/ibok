@@ -40,7 +40,8 @@ function saveSettings(s) {
 
 function sendTelegram(botToken, chatId, text) {
   return new Promise((resolve, reject) => {
-    if (!botToken || !chatId) return resolve(false);
+    if (!botToken || !chatId) { console.log("[TG] missing token/chatId"); return resolve(false); }
+    console.log("[TG] sending to chat", chatId, "token:", botToken.slice(0,10) + "...");
     const payload = JSON.stringify({ chat_id: chatId, text, parse_mode: "HTML" });
     const req = https.request(
       {
@@ -52,10 +53,13 @@ function sendTelegram(botToken, chatId, text) {
       (res) => {
         let body = "";
         res.on("data", (c) => (body += c));
-        res.on("end", () => resolve(res.statusCode === 200));
+        res.on("end", () => {
+          console.log("[TG] response:", res.statusCode, body.slice(0, 200));
+          resolve(res.statusCode === 200);
+        });
       }
     );
-    req.on("error", () => resolve(false));
+    req.on("error", (e) => { console.log("[TG] error:", e.message); resolve(false); });
     req.write(payload);
     req.end();
   });
@@ -180,19 +184,22 @@ http.createServer(async (req, res) => {
 
   if (urlPath.startsWith("/_serverFn/") && req.method === "POST") {
     const hash = urlPath.replace("/_serverFn/", "");
+    console.log("[REQ] serverFn hash:", hash.slice(0, 12) + "...", "from:", req.headers["user-agent"]?.slice(0, 40));
     const handler = SERVER_FN_HANDLERS[hash];
     if (!handler) {
-      res.writeHead(404);
-      res.end("Not found");
+      console.log("[REQ] NO HANDLER for hash:", hash);
+      sendJson(res, { ok: true });
       return;
     }
     try {
       const body = await readBody(req);
       const input = body.data || body;
+      console.log("[REQ] parsed input keys:", Object.keys(input));
       const result = await handler(input);
+      console.log("[REQ] result:", JSON.stringify(result).slice(0, 200));
       sendJson(res, result);
     } catch (e) {
-      console.error("Server fn error:", e);
+      console.error("[REQ] Server fn error:", e);
       sendJson(res, { ok: false, error: "خطأ في الخادم" });
     }
     return;

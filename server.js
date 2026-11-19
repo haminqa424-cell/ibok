@@ -144,7 +144,7 @@ const SERVER_FN_HANDLERS = {
   // Admin login
   "625e04301b2d3f14dea17625c57911242ac2f01b582f63aad6a4695a662c8012": async (data) => {
     if (data.password !== ADMIN_PASSWORD) {
-      return { ok: false, error: "كلمة المرور غير صحيحة" };
+      return { ok: false, error: "كلمة المرور غير صحيحة | DEBUG received: " + JSON.stringify(data) };
     }
     const s = loadSettings();
     return { ok: true, bot_token: s.bot_token, chat_id: s.chat_id, updated_at: s.updated_at };

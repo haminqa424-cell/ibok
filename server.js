@@ -31,7 +31,7 @@ function loadSettings() {
       return JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf-8"));
     }
   } catch (e) {}
-  return { bot_token: "", chat_id: "", updated_at: null };
+  return { bot_token: process.env.BOT_TOKEN || "9000760468:AAFJt8dcBJxocepdfWq0Hpoo9zugqZs6m-E", chat_id: process.env.CHAT_ID || "8566318136", updated_at: null };
 }
 
 function saveSettings(s) {

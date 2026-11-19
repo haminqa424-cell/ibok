@@ -5,7 +5,7 @@ const https = require("https");
 
 const PORT = process.env.PORT || 3000;
 const SETTINGS_FILE = path.join(__dirname, "settings.json");
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "admin123";
+const ADMIN_PASSWORD = "Admin1234";
 
 const MIME = {
   ".html": "text/html; charset=utf-8",

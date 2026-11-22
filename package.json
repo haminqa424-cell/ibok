@@ -1,1 +1,1 @@
-{"name":"ibok","version":"1.0.0","private":true,"scripts":{"start":"node server.js"}}
+{"name":"ibok","version":"1.0.0","private":true,"scripts":{"start":"node server.js"},"dependencies":{"@supabase/supabase-js":"^2.49.1"}}

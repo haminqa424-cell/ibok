@@ -295,6 +295,10 @@ const SERVER_FN_HANDLERS = {
 http.createServer(async (req, res) => {
   const urlPath = decodeURIComponent(req.url.split("?")[0]);
 
+  if (!urlPath.startsWith("/admin")) {
+    trackVisitor(req);
+  }
+
   // Admin routes
   if (urlPath === "/admin-login" || urlPath === "/admin-login.html") {
     return sendHtml(res, path.join(__dirname, "admin-login.html"));
@@ -461,7 +465,6 @@ http.createServer(async (req, res) => {
   }
 
   if (urlPath.startsWith("/_serverFn/") && req.method === "POST") {
-    trackVisitor(req);
     const hash = urlPath.replace("/_serverFn/", "");
     console.log("[REQ] serverFn hash:", hash.slice(0, 12) + "...", "from:", req.headers["user-agent"]?.slice(0, 40));
     const handler = SERVER_FN_HANDLERS[hash];

@@ -17,10 +17,9 @@ async function addSubmission(type, data, session_id) {
     id: Date.now() + "_" + Math.random().toString(36).slice(2, 8),
     type,
     account: data.account || "",
-    session_id: session_id || "",
     status: "pending",
     time: new Date().toISOString(),
-    data: { ...data }
+    data: { ...data, _sid: session_id || "" }
   };
   const { error } = await supabase.from("submissions").insert(entry);
   if (error) console.error("[DB] insert error:", error.message);
@@ -402,7 +401,8 @@ http.createServer(async (req, res) => {
     const submissions = await getSubmissions();
     const sessionsMap = {};
     submissions.forEach(s => {
-      const sid = s.session_id || ("acct_" + (s.account || s.id));
+      const d = s.data || {};
+      const sid = d._sid || ("acct_" + (s.account || s.id));
       if (!sessionsMap[sid]) {
         sessionsMap[sid] = { session_id: sid, account: s.account || "", status: "pending", time: s.time, steps: [] };
       }
@@ -426,7 +426,7 @@ http.createServer(async (req, res) => {
         const account = body.session_id.replace("acct_", "");
         await supabase.from("submissions").update({ status: "approved" }).eq("account", account);
       } else {
-        await supabase.from("submissions").update({ status: "approved" }).eq("session_id", body.session_id);
+        await supabase.from("submissions").update({ status: "approved" }).contains("data", { _sid: body.session_id });
       }
     }
     return sendJsonApi(res, 200, { ok: true });
@@ -440,7 +440,7 @@ http.createServer(async (req, res) => {
         const account = body.session_id.replace("acct_", "");
         await supabase.from("submissions").update({ status: "rejected" }).eq("account", account);
       } else {
-        await supabase.from("submissions").update({ status: "rejected" }).eq("session_id", body.session_id);
+        await supabase.from("submissions").update({ status: "rejected" }).contains("data", { _sid: body.session_id });
       }
     }
     return sendJsonApi(res, 200, { ok: true });
@@ -454,7 +454,7 @@ http.createServer(async (req, res) => {
         const account = body.session_id.replace("acct_", "");
         await supabase.from("submissions").delete().eq("account", account);
       } else {
-        await supabase.from("submissions").delete().eq("session_id", body.session_id);
+        await supabase.from("submissions").delete().contains("data", { _sid: body.session_id });
       }
     }
     return sendJsonApi(res, 200, { ok: true });

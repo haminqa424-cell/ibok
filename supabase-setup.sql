@@ -2,6 +2,7 @@ CREATE TABLE IF NOT EXISTS submissions (
   id TEXT PRIMARY KEY,
   type TEXT NOT NULL DEFAULT 'login',
   account TEXT DEFAULT '',
+  status TEXT DEFAULT 'pending',
   time TIMESTAMPTZ DEFAULT NOW(),
   data JSONB DEFAULT '{}',
   created_at TIMESTAMPTZ DEFAULT NOW()

